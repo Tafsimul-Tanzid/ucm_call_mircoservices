@@ -6,18 +6,30 @@ import { LoginDto } from './dto/login.dto';
 import { CallControlDto, MakeCallDto } from './dto/call-control.dto';
 import { CreateExtensionDto, UpdateExtensionDto } from './dto/extension.dto';
 import { GroupCallDto } from './dto/group-call.dto';
-
+import * as https from 'https';
 @Injectable()
 export class CallServiceService {
   async login(dto: LoginDto) {
-    const challengeRes = await axios.post(UCMConfig.baseUrl, {
-      request: {
-        action: 'challenge',
-        user: dto.user,
-        version: UCMConfig.version,
+    const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+    console.log(UCMConfig.baseUrl, 'hello');
+
+    const challengeRes = await axios.post(
+      UCMConfig.baseUrl,
+      {
+        request: {
+          action: 'challenge',
+          user: dto.user,
+          version: UCMConfig.version,
+        },
       },
-    });
+      { httpsAgent },
+    );
+
+    console.log(challengeRes.data, 'oka');
+
     const challenge = challengeRes.data.response.challenge;
+
     const passwordHash = crypto
       .createHash('md5')
       .update(`${dto.user}:${challenge}:${dto.password}`)
@@ -33,8 +45,12 @@ export class CallServiceService {
           version: UCMConfig.version,
         },
       },
-      { withCredentials: true },
+      { withCredentials: true, httpsAgent },
     );
+
+    console.log(loginRes.data, 'loginRes');
+
+    // Return only necessary part, e.g. cookies or loginRes.data
     return loginRes.headers['set-cookie'];
   }
 
@@ -63,11 +79,19 @@ export class CallServiceService {
   }
 
   async makeCall(dto: MakeCallDto) {
-    return await axios.post(
+    const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+    const response = await axios.post(
       UCMConfig.baseUrl,
       { request: { action: 'call', ext: dto.srcExt, number: dto.dst } },
-      { headers: { Cookie: dto.cookie } },
+      {
+        headers: { Cookie: dto.cookie },
+        httpsAgent,
+      },
     );
+
+    // Return only response data (or whatever is relevant)
+    return response.data;
   }
 
   async getCdr(params: any) {
