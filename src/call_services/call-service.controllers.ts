@@ -1,80 +1,154 @@
-import { Controller, Post, Body, Get, Query } from '@nestjs/common';
+import { Controller, Post, Body, Get, Query, Param, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { LoginDto } from './dto/login.dto';
 import { CallControlDto, MakeCallDto } from './dto/call-control.dto';
 import { CreateExtensionDto, UpdateExtensionDto } from './dto/extension.dto';
 import { CallServiceService } from './call-service.service';
-import { GroupCallDto } from './dto/group-call.dto';
-
 
 @Controller('call-service')
 export class CallServiceController {
   constructor(private readonly service: CallServiceService) {}
 
+  @Post('challenge')
+  challenge(@Body() body: { request: { action: string; user: string } }) {
+    return this.service.challenge(body.request);
+  }
+ 
   @Post('login')
   login(@Body() dto: LoginDto) {
+    console.log('Login called with DTO:', dto);
     return this.service.login(dto);
   }
 
-  @Post('logout')
-  logout(@Body('cookie') cookie: string) {
-    return this.service.logout(cookie);
-  }
-
-  @Post('call/accept')
-  acceptCall(@Body() dto: CallControlDto) {
-    return this.service.acceptCall(dto);
-  }
-
-  @Post('call/refuse')
-  refuseCall(@Body() dto: CallControlDto) {
-    return this.service.refuseCall(dto);
-  }
-
-  @Post('call/make')
-  makeCall(@Body() dto: MakeCallDto) {
-    return this.service.makeCall(dto);
-  }
-
-  @Get('cdr')
-  getCdr(@Query() params: any) {
-    return this.service.getCdr(params);
-  }
-
-  @Get('recordings')
-  listRecordings() {
-    return this.service.listRecordings();
+  @Post('cdr-data')
+  GetCdrData(@Body() requestData: any) {
+    return this.service.GetCdrData(requestData);
   }
 
   @Post('recordings/fetch')
-  fetchRecording(@Body() body: { filedir: string; filename: string }) {
-    return this.service.fetchRecording(body.filedir, body.filename);
+  fetchRecording(@Body() body: { 
+    request: { 
+      action: string; 
+      cookie: string; 
+      filename: string;
+    } 
+  }) {
+    return this.service.fetchRecording(body.request);
   }
 
-  @Post('extension/create')
-  createExtension(
-    @Body() dto: CreateExtensionDto,
-    @Body('cookie') cookie: string,
+  // 🎵 Stream recording directly for Postman preview/play
+  @Post('recordings/stream')
+  async streamRecording(
+    @Body() body: { 
+      request: { 
+        action: string; 
+        cookie: string; 
+        filename: string;
+      } 
+    },
+    @Res() res: Response
   ) {
-    return this.service.createExtension(dto, cookie);
+    try {
+      const response = await this.service.fetchRecordingStream(body.request);
+      
+      // Set headers for audio streaming that Postman can preview
+      res.set({
+        'Content-Type': 'audio/wav',
+        'Content-Disposition': `inline; filename="${body.request.filename}"`,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Content-Disposition',
+        'Cache-Control': 'no-cache'
+      });
+
+      // Pipe the stream directly to response
+      response.data.pipe(res);
+      
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 
-  @Post('extension/update')
-  updateExtension(@Body() dto: UpdateExtensionDto) {
-    return this.service.updateExtension(dto);
+  // 🔍 Debug endpoints to check session/cookie status
+  @Get('cookie/:user')
+  getCookie(@Param('user') user: string) {
+    const cookie = this.service.getCookie(user);
+    
+    if (cookie) {
+      return {
+        success: true,
+        user: user,
+        cookie: cookie,
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    return {
+      success: false,
+      message: `No cookie found for user: ${user}`,
+      timestamp: new Date().toISOString()
+    };
   }
 
-  @Post('extension/delete')
-  deleteExtension(
-    @Body('extension') ext: string,
-    @Body('cookie') cookie: string,
-  ) {
-    return this.service.deleteExtension(ext, cookie);
+  @Get('sessions')
+  getAllSessions() {
+    return this.service.getAllSessions();
   }
-  $1
 
-@Post('call/group')
-groupCall(@Body() dto: GroupCallDto) {
-  return this.service.groupCall(dto);
-}
+  // 🔧 Auto endpoints using stored sessions
+  @Post('recordings/fetch/auto')
+  fetchRecordingAuto(@Body() body: { 
+    request: { 
+      action: string; 
+      filename: string;
+    } 
+  }, @Query('user') user: string = 'cdrapi') {
+    return this.service.fetchRecordingWithSession(user, body.request);
+  }
 
+  @Post('cdr-data/auto')
+  getCdrDataAuto(@Body() requestData: any, @Query('user') user: string = 'cdrapi') {
+    return this.service.getCdrWithSession(user, requestData);
+  }
+
+  // 🧪 Test endpoint
+  @Get('debug/session/:user')
+  debugSession(@Param('user') user: string) {
+    const session = this.service.getSession(user);
+    
+    return {
+      user: user,
+      hasSession: !!session,
+      sessionData: session,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  // 🎯 Quick test endpoints
+  @Post('cdr-data/simple')
+  async getCdrDataSimple(@Query('user') user: string = 'cdrapi') {
+    const cookie = this.service.getCookie(user);
+    
+    if (!cookie) {
+      return {
+        success: false,
+        error: `No cookie found for user: ${user}. Please login first.`,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    const simpleRequest = {
+      request: {
+        action: "cdrapi",
+        cookie: cookie,
+        format: "json"
+      }
+    };
+
+    console.log('🧪 Testing simple CDR request:', simpleRequest);
+    return this.service.GetCdrData(simpleRequest);
+  }
 }
